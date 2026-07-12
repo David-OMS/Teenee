@@ -1,0 +1,77 @@
+import type { PracticeTemplate } from "@/types/practice-template/practice-template";
+
+/** pick object → ask what → student answers → student asks → AI answers → one new object */
+export const classroomObjectsFlowTemplate: PracticeTemplate = {
+  id: "classroom_objects_flow",
+  name: "Classroom Objects Flow",
+  description: "Pick object, ask what, answer, reverse roles, introduce new",
+  matchKeywords: [
+    "classroom",
+    "object",
+    "crayon",
+    "stylo",
+    "tableau",
+    "c'est quoi",
+    "qu'est-ce",
+    "what is",
+    "desk",
+    "chair",
+    "livre",
+    "chaise",
+    "table",
+    "sac",
+    "cahier",
+  ],
+  slots: [
+    {
+      id: "pick_object",
+      kind: "pick_object",
+      nodeKind: "exchange",
+      weight: "revision",
+      objectiveTemplate: "Pick {object} ({object_en})",
+      promptTemplate: "Point to or name {object}. Ask the student if they know what it is.",
+    },
+    {
+      id: "ask_what",
+      kind: "ask_what",
+      nodeKind: "exchange",
+      weight: "revision",
+      objectiveTemplate: "Ask what it is",
+      promptTemplate: "Ask Qu'est-ce que c'est ? about {object}.",
+    },
+    {
+      id: "student_answers",
+      kind: "student_answers",
+      nodeKind: "exchange",
+      weight: "revision",
+      objectiveTemplate: "Student names {object}",
+      promptTemplate: "Wait for the student to say {object} or {object_en}.",
+      recallGap: { silenceSeconds: 5, hintAfterSeconds: 8 },
+    },
+    {
+      id: "student_asks",
+      kind: "student_asks",
+      nodeKind: "exchange",
+      weight: "revision",
+      objectiveTemplate: "Student asks about {object_two}",
+      promptTemplate: "Invite the student to ask what {object_two} ({object_two_en}) is.",
+    },
+    {
+      id: "ai_answers",
+      kind: "ai_answers",
+      nodeKind: "exchange",
+      weight: "revision",
+      objectiveTemplate: "Answer with {object_two}",
+      promptTemplate: "Answer clearly: C'est {object_two} ({object_two_en}).",
+    },
+    {
+      id: "introduce_new",
+      kind: "introduce_new",
+      nodeKind: "stretch",
+      weight: "discovery",
+      objectiveTemplate: "Introduce {object_new}",
+      promptTemplate:
+        "Introduce one new object: {object_new} ({object_new_en}). Keep it brief.",
+    },
+  ],
+};

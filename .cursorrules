@@ -1,0 +1,16 @@
+## 1. Code Architecture
+- One file = one responsibility. No god files.
+- File Size Limits:
+  - Component (.tsx): target ≤150 lines, ceiling 200 lines
+  - Hook (.tsx): target ≤150 lines, ceiling 200 lines
+  - Utility/Service (.ts): target ≤200 lines, ceiling 300 lines
+  - Function (within any file): ≤40 lines
+  - Hard ceiling: any file ≥300 lines → must split
+
+- Split rules:
+  - Split by responsibility only
+  - Do NOT split when functionality is cohesive
+- Pattern: Single-Function Files + Orchestrator
+
+##2. Explain every change made so the user can understand what was just done,
+why it was done, so they understand the build and framework of the app.

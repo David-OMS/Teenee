@@ -1,0 +1,13 @@
+export type { Concept } from "@/types/knowledge/concept";
+export type { ConceptConfidence, ConfidenceScore } from "@/types/knowledge/concept-confidence";
+export type { ConceptKind } from "@/types/knowledge/concept-kind";
+export type { Expression } from "@/types/knowledge/expression";
+export type { Grammar } from "@/types/knowledge/grammar";
+export type { KnowledgeItem } from "@/types/knowledge/knowledge-item";
+export type { KnowledgeSnapshot } from "@/types/knowledge/knowledge-snapshot";
+export type { LearningWeakness } from "@/types/knowledge/learning-weakness";
+export type { MasteryLevel } from "@/types/knowledge/mastery-level";
+export type { ReviewIntervalDay } from "@/types/knowledge/review-intervals";
+export { REVIEW_INTERVALS_DAYS } from "@/types/knowledge/review-intervals";
+export type { ReviewSchedule } from "@/types/knowledge/review-schedule";
+export type { Vocabulary } from "@/types/knowledge/vocabulary";
