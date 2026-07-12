@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AudioWaveform } from "@/components/dump/AudioWaveform";
@@ -42,18 +42,26 @@ export function VoiceSessionStage({
 }: VoiceSessionStageProps) {
   const router = useRouter();
   const startedAtRef = useRef<number>(Date.now());
+  const contextRef = useRef(context);
+  contextRef.current = context;
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
 
-  const { status, transcript, error, connect, disconnect } = useRealtimeVoice(
-    sessionId,
-    onTurnComplete,
+  const getInstructionContext = useCallback(
+    () =>
+      contextRef.current
+        ? {
+            currentItemId: contextRef.current.currentItem.id,
+            turnsOnNode: contextRef.current.turnsOnNode,
+          }
+        : null,
+    [],
   );
 
-  useEffect(() => {
-    void connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
+  const { status, transcript, error, disconnect } = useRealtimeVoice(sessionId, {
+    onAssistantTurnComplete: onTurnComplete,
+    getInstructionContext,
+  });
 
   async function handleEnd() {
     setIsEnding(true);

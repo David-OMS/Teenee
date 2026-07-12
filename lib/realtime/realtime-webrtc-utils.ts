@@ -9,9 +9,16 @@ export function createSessionUpdateEvent(instructions: string) {
   };
 }
 
+export function createCancelResponseEvent() {
+  return { type: "response.cancel" };
+}
+
 export function attachRemoteAudio(pc: RTCPeerConnection, audioElement: HTMLAudioElement) {
   pc.ontrack = (event) => {
-    audioElement.srcObject = event.streams[0] ?? null;
+    const [stream] = event.streams;
+    if (stream) {
+      audioElement.srcObject = stream;
+    }
   };
 }
 
@@ -23,6 +30,7 @@ export function cleanupPeerConnection(
   stopMediaStream(stream);
   pc?.close();
   if (audioElement) {
+    audioElement.pause();
     audioElement.srcObject = null;
   }
 }

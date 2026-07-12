@@ -6,26 +6,41 @@ import {
   appendTranscriptDelta,
   extractTranscriptFromEvent,
   isAssistantTurnComplete,
+  isUserSpeechCommitted,
   type TranscriptLine,
 } from "@/lib/realtime/parse-realtime-event";
 import {
   attachRemoteAudio,
   cleanupPeerConnection,
+  createCancelResponseEvent,
   createSessionUpdateEvent,
 } from "@/lib/realtime/realtime-webrtc-utils";
 
 export type RealtimeVoiceStatus = "idle" | "connecting" | "connected" | "error";
 
-export function useRealtimeVoice(
-  sessionId: string | null,
-  onAssistantTurnComplete?: () => void | Promise<void>,
-) {
-  const onTurnCompleteRef = useRef(onAssistantTurnComplete);
+export type RealtimeInstructionContext = {
+  currentItemId: string;
+  turnsOnNode: number;
+};
+
+type UseRealtimeVoiceOptions = {
+  onAssistantTurnComplete?: () => void | Promise<void>;
+  getInstructionContext?: () => RealtimeInstructionContext | null;
+};
+
+export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeVoiceOptions = {}) {
+  const onTurnCompleteRef = useRef(options.onAssistantTurnComplete);
+  const getInstructionContextRef = useRef(options.getInstructionContext);
   const refreshInstructionsRef = useRef<(() => Promise<void>) | null>(null);
+  const userSpokeSinceLastAdvanceRef = useRef(false);
+  const turnCompleteLockRef = useRef(false);
+  const connectingRef = useRef(false);
 
   useEffect(() => {
-    onTurnCompleteRef.current = onAssistantTurnComplete;
-  }, [onAssistantTurnComplete]);
+    onTurnCompleteRef.current = options.onAssistantTurnComplete;
+    getInstructionContextRef.current = options.getInstructionContext;
+  }, [options.onAssistantTurnComplete, options.getInstructionContext]);
+
   const [status, setStatus] = useState<RealtimeVoiceStatus>("idle");
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +51,7 @@ export function useRealtimeVoice(
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const disconnect = useCallback(() => {
+    connectingRef.current = false;
     cleanupPeerConnection(pcRef.current, streamRef.current, audioRef.current);
     pcRef.current = null;
     dcRef.current = null;
@@ -45,11 +61,60 @@ export function useRealtimeVoice(
 
   useEffect(() => disconnect, [disconnect]);
 
-  const connect = useCallback(async () => {
-    if (!sessionId) {
+  const refreshInstructions = useCallback(async () => {
+    if (!sessionId || !dcRef.current || dcRef.current.readyState !== "open") {
       return;
     }
 
+    const instructionContext = getInstructionContextRef.current?.();
+    const params = new URLSearchParams({ sessionId });
+    if (instructionContext) {
+      params.set("currentItemId", instructionContext.currentItemId);
+      params.set("turnsOnNode", String(instructionContext.turnsOnNode));
+    }
+
+    const response = await fetch(`/api/realtime/instructions?${params.toString()}`);
+    const payload = (await response.json()) as { instructions?: string; error?: string };
+    if (!response.ok || !payload.instructions) {
+      return;
+    }
+
+    dcRef.current.send(JSON.stringify(createCancelResponseEvent()));
+    dcRef.current.send(JSON.stringify(createSessionUpdateEvent(payload.instructions)));
+  }, [sessionId]);
+
+  useEffect(() => {
+    refreshInstructionsRef.current = refreshInstructions;
+  }, [refreshInstructions]);
+
+  const handleAssistantTurnComplete = useCallback(async () => {
+    if (turnCompleteLockRef.current) {
+      return;
+    }
+
+    if (!userSpokeSinceLastAdvanceRef.current) {
+      return;
+    }
+
+    turnCompleteLockRef.current = true;
+    userSpokeSinceLastAdvanceRef.current = false;
+
+    try {
+      await onTurnCompleteRef.current?.();
+      await refreshInstructionsRef.current?.();
+    } finally {
+      window.setTimeout(() => {
+        turnCompleteLockRef.current = false;
+      }, 1200);
+    }
+  }, []);
+
+  const connect = useCallback(async () => {
+    if (!sessionId || connectingRef.current || pcRef.current) {
+      return;
+    }
+
+    connectingRef.current = true;
     setError(null);
     setStatus("connecting");
 
@@ -73,16 +138,21 @@ export function useRealtimeVoice(
         try {
           const event = JSON.parse(String(messageEvent.data)) as Record<string, unknown>;
 
+          if (isUserSpeechCommitted(event)) {
+            userSpokeSinceLastAdvanceRef.current = true;
+          }
+
           if (isAssistantTurnComplete(event)) {
-            void (async () => {
-              await onTurnCompleteRef.current?.();
-              await refreshInstructionsRef.current?.();
-            })();
+            void handleAssistantTurnComplete();
           }
 
           const parts = extractTranscriptFromEvent(event);
           if (parts.length === 0) {
             return;
+          }
+
+          if (parts.some((part) => part.role === "user")) {
+            userSpokeSinceLastAdvanceRef.current = true;
           }
 
           setTranscript((current) => {
@@ -121,26 +191,22 @@ export function useRealtimeVoice(
       disconnect();
       setStatus("error");
       setError(connectError instanceof Error ? connectError.message : "Voice connection failed.");
+    } finally {
+      connectingRef.current = false;
     }
-  }, [disconnect, sessionId]);
-
-  const refreshInstructions = useCallback(async () => {
-    if (!sessionId || !dcRef.current || dcRef.current.readyState !== "open") {
-      return;
-    }
-
-    const response = await fetch(`/api/realtime/instructions?sessionId=${sessionId}`);
-    const payload = (await response.json()) as { instructions?: string; error?: string };
-    if (!response.ok || !payload.instructions) {
-      return;
-    }
-
-    dcRef.current.send(JSON.stringify(createSessionUpdateEvent(payload.instructions)));
-  }, [sessionId]);
+  }, [disconnect, handleAssistantTurnComplete, sessionId]);
 
   useEffect(() => {
-    refreshInstructionsRef.current = refreshInstructions;
-  }, [refreshInstructions]);
+    if (!sessionId) {
+      return;
+    }
+
+    void connect();
+
+    return () => {
+      disconnect();
+    };
+  }, [connect, disconnect, sessionId]);
 
   return {
     status,

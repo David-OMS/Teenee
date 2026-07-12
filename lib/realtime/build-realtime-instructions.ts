@@ -1,5 +1,13 @@
 import { getConversationModeBehavior } from "@/lib/conversation/conversation-mode-behavior";
 import { getCorrectionStyleBehavior } from "@/lib/conversation/correction-style-behavior";
+import {
+  formatKnowledgeScopeInstructions,
+  type KnowledgeBaseScope,
+} from "@/lib/realtime/build-knowledge-base-scope";
+import {
+  formatActiveRecallForScope,
+  formatPracticeBeatCue,
+} from "@/lib/realtime/format-practice-beat-cue";
 import type { AppSettings } from "@/lib/settings/app-settings";
 import type { TurnContextSlice } from "@/types/session/turn-context-slice";
 
@@ -8,39 +16,40 @@ function formatCorrectionBudget(context: TurnContextSlice): string {
   return `Correction budget this turn: max ${correctionBudget.maxGrammar} grammar, max ${correctionBudget.maxPronunciation} pronunciation. Used: ${correctionBudget.grammarUsed} grammar, ${correctionBudget.pronunciationUsed} pronunciation.`;
 }
 
-function formatActiveRecall(context: TurnContextSlice): string {
-  if (!context.activeRecall) {
-    return "";
-  }
-
-  return `Active recall: wait ${context.activeRecall.silenceSeconds}s silence, hint after ${context.activeRecall.hintAfterSeconds}s. Expected production: ${context.activeRecall.expectedProduction ?? "see objective"}.`;
-}
-
-/** Minimal per-turn instructions for Realtime — agenda slice + mode + policy. */
+/** Minimal per-turn instructions for Realtime — agenda slice + knowledge base + mode. */
 export function buildRealtimeInstructions(
   context: TurnContextSlice,
   settings: AppSettings,
   lessonTitle: string,
+  knowledgeScope: KnowledgeBaseScope,
 ): string {
   const mode = getConversationModeBehavior(settings.defaultConversationMode);
   const correction = getCorrectionStyleBehavior(settings.correctionStyle);
   const node = context.currentItem.node;
+  const beatCue = formatPracticeBeatCue(context, knowledgeScope);
 
   return [
     "You are Teenee — a French conversation partner for a student practicing after class.",
     `Lesson: ${lessonTitle}. Phase: ${context.phase}.`,
-    `Student CEFR target: ${settings.targetCefr}. Match complexity to this level.`,
+    `Student level: ${knowledgeScope.estimatedCefr} (target ${knowledgeScope.targetCefr}).`,
     mode.promptGuidance.trim(),
     correction.promptGuidance.trim(),
-    `Current objective: ${node.objective}`,
-    `Prompts: ${node.prompts.join(" ")}`,
+    "",
+    formatKnowledgeScopeInstructions(knowledgeScope),
+    "",
+    "CONVERSATION RULES:",
+    "- ONE turn at a time — then stop and listen. No monologues.",
+    "- Never list vocabulary. Never teach unprompted.",
+    "",
+    `Current beat: ${node.objective}`,
+    `Your cue for this beat: ${beatCue}`,
     context.anchorPhrase ? `Anchor phrase if conversation drifts: ${context.anchorPhrase}` : "",
     context.weaknessHint ? `Known weakness to watch: ${context.weaknessHint}` : "",
     formatCorrectionBudget(context),
-    formatActiveRecall(context),
+    formatActiveRecallForScope(context, knowledgeScope),
     context.phaseGuidance ?? "",
     `Turn detection: also treat these as end-of-turn cues: ${settings.triggerPhrases.join(", ")}`,
-    "Keep responses concise. French-first. No chat UI filler.",
+    "French-first. No chat UI filler.",
   ]
     .filter(Boolean)
     .join("\n");

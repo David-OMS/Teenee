@@ -44,3 +44,11 @@ export function extractTranscriptFromEvent(event: Record<string, unknown>): Tran
 export function isAssistantTurnComplete(event: Record<string, unknown>): boolean {
   return String(event.type ?? "") === "response.done";
 }
+
+export function isUserSpeechCommitted(event: Record<string, unknown>): boolean {
+  const type = String(event.type ?? "");
+  return (
+    type === "conversation.item.input_audio_transcription.completed" ||
+    type === "input_audio_buffer.committed"
+  );
+}

@@ -12,9 +12,16 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "sessionId required." }, { status: 400 });
     }
 
+    const currentItemId = searchParams.get("currentItemId") ?? undefined;
+    const turnsOnNode = searchParams.get("turnsOnNode");
+    const parsedTurns = turnsOnNode ? Number(turnsOnNode) : undefined;
+
     const supabase = createServerClient();
     const userId = await getDefaultUserId(supabase);
-    const result = await buildInstructionsForSession(supabase, userId, sessionId);
+    const result = await buildInstructionsForSession(supabase, userId, sessionId, {
+      currentItemId,
+      turnsOnNode: parsedTurns,
+    });
 
     return NextResponse.json(result);
   } catch (error) {
