@@ -1,9 +1,19 @@
-const CACHE_NAME = "teenee-shell-v1";
-const SHELL_URLS = ["/", "/offline", "/manifest.webmanifest", "/icons/icon.svg"];
+const CACHE_NAME = "teenee-shell-v2";
+const SHELL_URLS = [
+  "/",
+  "/offline",
+  "/manifest.webmanifest",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)).then(() => self.skipWaiting()),
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(SHELL_URLS))
+      .then(() => self.skipWaiting()),
   );
 });
 

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Inter } from "next/font/google";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { InstallPrompt } from "@/components/layout/InstallPrompt";
 import { OfflineBanner } from "@/components/layout/OfflineBanner";
 import { ServiceWorkerRegistration } from "@/components/layout/ServiceWorkerRegistration";
 
@@ -28,6 +29,13 @@ export const metadata: Metadata = {
     title: "Teenee",
   },
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {
@@ -51,6 +59,7 @@ export default function RootLayout({
       <body className="min-h-full bg-canvas-light text-foreground-light antialiased">
         <ServiceWorkerRegistration />
         <OfflineBanner />
+        <InstallPrompt />
         <AppShell>{children}</AppShell>
       </body>
     </html>
