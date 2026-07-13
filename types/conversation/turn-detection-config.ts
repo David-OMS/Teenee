@@ -4,6 +4,6 @@ export type TurnDetectionConfig = {
 };
 
 export const DEFAULT_TURN_DETECTION: TurnDetectionConfig = {
-  silenceTimeoutSeconds: 5,
+  silenceTimeoutSeconds: 2,
   triggerPhrases: ["Your turn.", "Go ahead.", "That's all."],
 };

@@ -11,7 +11,7 @@ export async function buildInstructionsForSession(
   supabase: ServerClient,
   userId: string,
   sessionId: string,
-  options: { currentItemId?: string; turnsOnNode?: number } = {},
+  options: { currentItemId?: string; turnsOnNode?: number; promptOverride?: string } = {},
 ): Promise<{ instructions: string; lessonTitle: string }> {
   const session = await fetchSessionById(supabase, sessionId);
 
@@ -39,6 +39,7 @@ export async function buildInstructionsForSession(
     settings,
     sessionContext.lessonTitle,
     knowledgeScope,
+    options.promptOverride,
   );
 
   return { instructions, lessonTitle: sessionContext.lessonTitle };

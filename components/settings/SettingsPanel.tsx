@@ -9,6 +9,7 @@ import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { SelectField } from "@/components/ui/SelectField";
 import { TextField } from "@/components/ui/TextField";
 import { ToggleField } from "@/components/ui/ToggleField";
+import { useVoiceInputMode } from "@/hooks/use-voice-input-mode";
 import {
   conversationModeOptions,
   getConversationModeBehavior,
@@ -32,6 +33,7 @@ const cefrLevels = ["A1", "A2", "B1", "B2", "C1", "C2"].map((level) => ({
 export function SettingsPanel() {
   const { settings, isLoading, isSaving, error, save } = useUserSettings();
   const { profile, save: saveProfile, isSaving: isProfileSaving } = useUserProfile();
+  const { mode: voiceInputMode, setMode: setVoiceInputMode } = useVoiceInputMode();
   const [draftPhrases, setDraftPhrases] = useState<string[]>([]);
   const [draftName, setDraftName] = useState("");
 
@@ -106,15 +108,30 @@ export function SettingsPanel() {
       />
 
       <SelectField
+        label="Voice input"
+        value={voiceInputMode}
+        options={[
+          { value: "auto", label: "Auto — detect when you stop" },
+          { value: "push_to_talk", label: "Push-to-talk — hold button" },
+        ]}
+        disabled={saving}
+        onChange={(value) => setVoiceInputMode(value === "push_to_talk" ? "push_to_talk" : "auto")}
+      />
+      <p className="text-xs leading-relaxed text-muted-light">
+        Auto uses silence detection (tap &quot;Done speaking&quot; in session if it waits too long).
+        Push-to-talk mutes the mic until you hold the button.
+      </p>
+
+      <SelectField
         label="Silence timeout (seconds)"
         value={String(settings.silenceTimeoutSeconds)}
         options={[
+          { value: "1", label: "1 second — snappy" },
+          { value: "2", label: "2 seconds (default)" },
           { value: "3", label: "3 seconds" },
           { value: "5", label: "5 seconds" },
-          { value: "8", label: "8 seconds" },
-          { value: "10", label: "10 seconds" },
         ]}
-        disabled={saving}
+        disabled={saving || voiceInputMode === "push_to_talk"}
         onChange={(value) => void save({ silenceTimeoutSeconds: Number(value) })}
       />
 

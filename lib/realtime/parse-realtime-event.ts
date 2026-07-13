@@ -45,6 +45,11 @@ export function isAssistantTurnComplete(event: Record<string, unknown>): boolean
   return String(event.type ?? "") === "response.done";
 }
 
+export function isAssistantResponseStarted(event: Record<string, unknown>): boolean {
+  const type = String(event.type ?? "");
+  return type === "response.created" || type === "response.output_audio.delta";
+}
+
 export function isUserSpeechCommitted(event: Record<string, unknown>): boolean {
   const type = String(event.type ?? "");
   return (

@@ -15,12 +15,14 @@ export async function GET(request: Request) {
     const currentItemId = searchParams.get("currentItemId") ?? undefined;
     const turnsOnNode = searchParams.get("turnsOnNode");
     const parsedTurns = turnsOnNode ? Number(turnsOnNode) : undefined;
+    const promptOverride = searchParams.get("promptOverride") ?? undefined;
 
     const supabase = createServerClient();
     const userId = await getDefaultUserId(supabase);
     const result = await buildInstructionsForSession(supabase, userId, sessionId, {
       currentItemId,
       turnsOnNode: parsedTurns,
+      promptOverride,
     });
 
     return NextResponse.json(result);

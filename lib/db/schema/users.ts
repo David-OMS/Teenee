@@ -13,7 +13,7 @@ export const users = pgTable("users", {
     .$type<{ id: string; label: string; completed: boolean }[]>()
     .notNull()
     .default([]),
-  silenceTimeoutSeconds: integer("silence_timeout_seconds").notNull().default(5),
+  silenceTimeoutSeconds: integer("silence_timeout_seconds").notNull().default(2),
   triggerPhrases: jsonb("trigger_phrases").$type<string[]>().notNull().default([
     "Your turn.",
     "Go ahead.",

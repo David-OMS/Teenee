@@ -64,6 +64,7 @@ export function ExplainSessionPanel() {
         phase="explain"
         context={context}
         showTranscript={settings?.transcriptVisible ?? false}
+        silenceTimeoutSeconds={settings?.silenceTimeoutSeconds ?? 2}
         onTurnComplete={async () => {
           await advance("success");
         }}

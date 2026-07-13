@@ -72,6 +72,7 @@ export function PracticeSessionPanel() {
           phase="practice"
           context={context}
           showTranscript={settings?.transcriptVisible ?? false}
+          silenceTimeoutSeconds={settings?.silenceTimeoutSeconds ?? 2}
           reviewOnEnd
           onTurnComplete={async () => {
             await advance("success");

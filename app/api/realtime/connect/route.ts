@@ -6,6 +6,7 @@ import { readOpenAiApiKey } from "@/lib/openai/read-openai-api-key";
 import { getDefaultUserId } from "@/lib/lessons/get-default-user-id";
 import { createServerClient } from "@/lib/supabase/create-server-client";
 import { fetchUserSettings } from "@/lib/settings/fetch-user-settings";
+import type { VoiceInputMode } from "@/types/conversation/voice-input-mode";
 
 /** WebRTC unified interface — proxy SDP + session config to OpenAI Realtime. */
 export async function POST(request: Request) {
@@ -27,7 +28,12 @@ export async function POST(request: Request) {
       fetchUserSettings(),
     ]);
 
-    const sessionConfig = buildRealtimeSessionConfig(instructions, settings);
+    const voiceInputMode = request.headers.get("x-teenee-voice-input-mode") as VoiceInputMode | null;
+    const sessionConfig = buildRealtimeSessionConfig(
+      instructions,
+      settings,
+      voiceInputMode === "push_to_talk" ? "push_to_talk" : "auto",
+    );
     const formData = new FormData();
     formData.set("sdp", sdp);
     formData.set("session", JSON.stringify(sessionConfig));

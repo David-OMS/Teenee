@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   appendTranscriptDelta,
   extractTranscriptFromEvent,
+  isAssistantResponseStarted,
   isAssistantTurnComplete,
   isUserSpeechCommitted,
   type TranscriptLine,
@@ -13,28 +14,50 @@ import {
   attachRemoteAudio,
   cleanupPeerConnection,
   createCancelResponseEvent,
+  createClearInputBufferEvent,
+  createCommitInputBufferEvent,
+  createResponseCreateEvent,
   createSessionUpdateEvent,
+  setMicrophoneEnabled,
 } from "@/lib/realtime/realtime-webrtc-utils";
+import type { VoiceInputMode } from "@/types/conversation/voice-input-mode";
 
 export type RealtimeVoiceStatus = "idle" | "connecting" | "connected" | "error";
 
 export type RealtimeInstructionContext = {
   currentItemId: string;
   turnsOnNode: number;
+  promptOverride?: string;
 };
 
 type UseRealtimeVoiceOptions = {
+  voiceInputMode?: VoiceInputMode;
+  silenceTimeoutSeconds?: number;
   onAssistantTurnComplete?: () => void | Promise<void>;
   getInstructionContext?: () => RealtimeInstructionContext | null;
 };
 
+function sendDataChannelEvent(dc: RTCDataChannel, event: Record<string, unknown>) {
+  if (dc.readyState !== "open") {
+    return;
+  }
+
+  dc.send(JSON.stringify(event));
+}
+
 export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeVoiceOptions = {}) {
+  const voiceInputMode = options.voiceInputMode ?? "auto";
+  const silenceTimeoutSeconds = options.silenceTimeoutSeconds ?? 2;
+
   const onTurnCompleteRef = useRef(options.onAssistantTurnComplete);
   const getInstructionContextRef = useRef(options.getInstructionContext);
   const refreshInstructionsRef = useRef<(() => Promise<void>) | null>(null);
   const userSpokeSinceLastAdvanceRef = useRef(false);
   const turnCompleteLockRef = useRef(false);
   const connectingRef = useRef(false);
+  const assistantSpeakingRef = useRef(false);
+  const responseInFlightRef = useRef(false);
+  const sessionGenerationRef = useRef(0);
 
   useEffect(() => {
     onTurnCompleteRef.current = options.onAssistantTurnComplete;
@@ -44,18 +67,54 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
   const [status, setStatus] = useState<RealtimeVoiceStatus>("idle");
   const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isPushToTalkActive, setIsPushToTalkActive] = useState(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const beginAssistantSpeech = useCallback(() => {
+    assistantSpeakingRef.current = true;
+    responseInFlightRef.current = true;
+    setMicrophoneEnabled(streamRef.current, false);
+
+    const dc = dcRef.current;
+    if (dc) {
+      sendDataChannelEvent(dc, createClearInputBufferEvent());
+    }
+  }, []);
+
+  const endAssistantSpeech = useCallback(() => {
+    assistantSpeakingRef.current = false;
+    responseInFlightRef.current = false;
+
+    window.setTimeout(() => {
+      if (assistantSpeakingRef.current) {
+        return;
+      }
+
+      const dc = dcRef.current;
+      if (dc) {
+        sendDataChannelEvent(dc, createClearInputBufferEvent());
+      }
+
+      if (voiceInputMode === "auto") {
+        setMicrophoneEnabled(streamRef.current, true);
+      }
+    }, 350);
+  }, [voiceInputMode]);
+
   const disconnect = useCallback(() => {
+    sessionGenerationRef.current += 1;
     connectingRef.current = false;
+    assistantSpeakingRef.current = false;
+    responseInFlightRef.current = false;
     cleanupPeerConnection(pcRef.current, streamRef.current, audioRef.current);
     pcRef.current = null;
     dcRef.current = null;
     streamRef.current = null;
+    setIsPushToTalkActive(false);
     setStatus("idle");
   }, []);
 
@@ -66,11 +125,18 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
       return;
     }
 
+    if (responseInFlightRef.current) {
+      return;
+    }
+
     const instructionContext = getInstructionContextRef.current?.();
     const params = new URLSearchParams({ sessionId });
     if (instructionContext) {
       params.set("currentItemId", instructionContext.currentItemId);
       params.set("turnsOnNode", String(instructionContext.turnsOnNode));
+      if (instructionContext.promptOverride?.trim()) {
+        params.set("promptOverride", instructionContext.promptOverride.trim());
+      }
     }
 
     const response = await fetch(`/api/realtime/instructions?${params.toString()}`);
@@ -79,9 +145,16 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
       return;
     }
 
-    dcRef.current.send(JSON.stringify(createCancelResponseEvent()));
-    dcRef.current.send(JSON.stringify(createSessionUpdateEvent(payload.instructions)));
-  }, [sessionId]);
+    const dc = dcRef.current;
+    sendDataChannelEvent(dc, createCancelResponseEvent());
+    sendDataChannelEvent(
+      dc,
+      createSessionUpdateEvent(payload.instructions, {
+        voiceInputMode,
+        silenceTimeoutSeconds,
+      }),
+    );
+  }, [sessionId, silenceTimeoutSeconds, voiceInputMode]);
 
   useEffect(() => {
     refreshInstructionsRef.current = refreshInstructions;
@@ -91,6 +164,8 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     if (turnCompleteLockRef.current) {
       return;
     }
+
+    endAssistantSpeech();
 
     if (!userSpokeSinceLastAdvanceRef.current) {
       return;
@@ -107,20 +182,67 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
         turnCompleteLockRef.current = false;
       }, 1200);
     }
+  }, [endAssistantSpeech]);
+
+  const commitUserTurn = useCallback(() => {
+    const dc = dcRef.current;
+    if (!dc || dc.readyState !== "open" || assistantSpeakingRef.current) {
+      return;
+    }
+
+    userSpokeSinceLastAdvanceRef.current = true;
+    sendDataChannelEvent(dc, createCommitInputBufferEvent());
+
+    if (voiceInputMode === "push_to_talk") {
+      sendDataChannelEvent(dc, createResponseCreateEvent());
+      setIsPushToTalkActive(false);
+      setMicrophoneEnabled(streamRef.current, false);
+    }
+  }, [voiceInputMode]);
+
+  const startPushToTalk = useCallback(() => {
+    const dc = dcRef.current;
+    if (!dc || dc.readyState !== "open" || assistantSpeakingRef.current) {
+      return;
+    }
+
+    setIsPushToTalkActive(true);
+    setMicrophoneEnabled(streamRef.current, true);
+    sendDataChannelEvent(dc, createClearInputBufferEvent());
   }, []);
+
+  const stopPushToTalk = useCallback(() => {
+    if (!isPushToTalkActive) {
+      return;
+    }
+
+    commitUserTurn();
+  }, [commitUserTurn, isPushToTalkActive]);
 
   const connect = useCallback(async () => {
     if (!sessionId || connectingRef.current || pcRef.current) {
       return;
     }
 
+    const generation = sessionGenerationRef.current + 1;
+    sessionGenerationRef.current = generation;
     connectingRef.current = true;
     setError(null);
     setStatus("connecting");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       streamRef.current = stream;
+
+      if (voiceInputMode === "push_to_talk") {
+        setMicrophoneEnabled(stream, false);
+      }
 
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
@@ -138,8 +260,14 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
         try {
           const event = JSON.parse(String(messageEvent.data)) as Record<string, unknown>;
 
+          if (isAssistantResponseStarted(event)) {
+            beginAssistantSpeech();
+          }
+
           if (isUserSpeechCommitted(event)) {
-            userSpokeSinceLastAdvanceRef.current = true;
+            if (!assistantSpeakingRef.current) {
+              userSpokeSinceLastAdvanceRef.current = true;
+            }
           }
 
           if (isAssistantTurnComplete(event)) {
@@ -151,7 +279,7 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
             return;
           }
 
-          if (parts.some((part) => part.role === "user")) {
+          if (parts.some((part) => part.role === "user") && !assistantSpeakingRef.current) {
             userSpokeSinceLastAdvanceRef.current = true;
           }
 
@@ -175,9 +303,14 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
         headers: {
           "Content-Type": "application/sdp",
           "x-teenee-session-id": sessionId,
+          "x-teenee-voice-input-mode": voiceInputMode,
         },
         body: offer.sdp,
       });
+
+      if (generation !== sessionGenerationRef.current) {
+        return;
+      }
 
       if (!sdpResponse.ok) {
         const payload = (await sdpResponse.json()) as { error?: string };
@@ -188,13 +321,17 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       setStatus("connected");
     } catch (connectError) {
-      disconnect();
-      setStatus("error");
-      setError(connectError instanceof Error ? connectError.message : "Voice connection failed.");
+      if (generation === sessionGenerationRef.current) {
+        disconnect();
+        setStatus("error");
+        setError(connectError instanceof Error ? connectError.message : "Voice connection failed.");
+      }
     } finally {
-      connectingRef.current = false;
+      if (generation === sessionGenerationRef.current) {
+        connectingRef.current = false;
+      }
     }
-  }, [disconnect, handleAssistantTurnComplete, sessionId]);
+  }, [beginAssistantSpeech, disconnect, handleAssistantTurnComplete, sessionId, voiceInputMode]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -215,5 +352,10 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     connect,
     disconnect,
     refreshInstructions,
+    commitUserTurn,
+    startPushToTalk,
+    stopPushToTalk,
+    isPushToTalkActive,
+    voiceInputMode,
   };
 }

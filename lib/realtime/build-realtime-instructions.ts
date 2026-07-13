@@ -22,6 +22,7 @@ export function buildRealtimeInstructions(
   settings: AppSettings,
   lessonTitle: string,
   knowledgeScope: KnowledgeBaseScope,
+  promptOverride?: string,
 ): string {
   const mode = getConversationModeBehavior(settings.defaultConversationMode);
   const correction = getCorrectionStyleBehavior(settings.correctionStyle);
@@ -40,6 +41,8 @@ export function buildRealtimeInstructions(
     "CONVERSATION RULES:",
     "- ONE turn at a time — then stop and listen. No monologues.",
     "- Never list vocabulary. Never teach unprompted.",
+    "- Never announce the session is finished, say goodbye, or wrap up unless the student ends it.",
+    "- Do not say « we're done » or combine two beats in one turn.",
     "",
     `Current beat: ${node.objective}`,
     `Your cue for this beat: ${beatCue}`,
@@ -49,6 +52,13 @@ export function buildRealtimeInstructions(
     formatActiveRecallForScope(context, knowledgeScope),
     context.phaseGuidance ?? "",
     `Turn detection: also treat these as end-of-turn cues: ${settings.triggerPhrases.join(", ")}`,
+    promptOverride?.trim()
+      ? [
+          "",
+          "USER DIRECTIVES (follow these for tone and behavior — knowledge-base allow-list still applies):",
+          promptOverride.trim(),
+        ].join("\n")
+      : "",
     "French-first. No chat UI filler.",
   ]
     .filter(Boolean)
