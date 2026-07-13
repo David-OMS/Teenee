@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { unlockAudioPlayback } from "@/lib/audio/unlock-audio-playback";
 import { createAudioAnalyser } from "@/lib/audio/create-audio-analyser";
 import { readAudioLevels } from "@/lib/audio/read-audio-levels";
 import { stopMediaStream } from "@/lib/audio/stop-media-stream";
@@ -9,6 +10,7 @@ import type { TranscriptLine } from "@/lib/realtime/parse-realtime-event";
 
 export type BudgetVoiceStatus =
   | "idle"
+  | "ready"
   | "connecting"
   | "connected"
   | "recording"
@@ -33,6 +35,12 @@ type BudgetVoiceResponse = {
   assistantText: string;
   audioBase64: string;
   mimeType: string;
+};
+
+const MIC_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
 };
 
 async function playAudioBase64(audioBase64: string, mimeType: string): Promise<void> {
@@ -66,6 +74,11 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
   const frameRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const openedRef = useRef(false);
+  const transcriptRef = useRef<TranscriptLine[]>([]);
+
+  useEffect(() => {
+    transcriptRef.current = transcript;
+  }, [transcript]);
 
   const stopVisualizer = useCallback(() => {
     if (frameRef.current !== null) {
@@ -74,24 +87,43 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
     }
   }, []);
 
-  const cleanupRecording = useCallback(() => {
+  const stopRecorderOnly = useCallback(() => {
     stopVisualizer();
     recorderRef.current = null;
+    setIsRecording(false);
+  }, [stopVisualizer]);
+
+  const cleanupAll = useCallback(() => {
+    stopRecorderOnly();
     void audioContextRef.current?.close();
     audioContextRef.current = null;
     stopMediaStream(streamRef.current);
     streamRef.current = null;
-    setIsRecording(false);
-  }, [stopVisualizer]);
+  }, [stopRecorderOnly]);
 
   const disconnect = useCallback(() => {
     sessionGenerationRef.current += 1;
-    cleanupRecording();
+    cleanupAll();
     openedRef.current = false;
     setStatus("idle");
-  }, [cleanupRecording]);
+  }, [cleanupAll]);
 
   useEffect(() => disconnect, [disconnect]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    if (contextReady) {
+      setStatus("ready");
+      setError(null);
+    }
+
+    return () => {
+      disconnect();
+    };
+  }, [contextReady, disconnect, sessionId]);
 
   const appendTurn = useCallback((userText: string | null, assistantText: string) => {
     setTranscript((current) => {
@@ -107,7 +139,19 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
   const handleBudgetResponse = useCallback(
     async (payload: BudgetVoiceResponse, advanceAfter: boolean) => {
       setStatus("speaking");
-      await playAudioBase64(payload.audioBase64, payload.mimeType);
+      try {
+        await playAudioBase64(payload.audioBase64, payload.mimeType);
+      } catch (playError) {
+        appendTurn(payload.userText, payload.assistantText);
+        setStatus("connected");
+        setError(
+          playError instanceof Error
+            ? playError.message
+            : "Could not play audio. Tap Talk again to continue.",
+        );
+        return;
+      }
+
       appendTurn(payload.userText, payload.assistantText);
 
       if (advanceAfter && payload.userText?.trim()) {
@@ -118,6 +162,26 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
     },
     [appendTurn],
   );
+
+  const ensureMicStream = useCallback(async (): Promise<MediaStream> => {
+    if (streamRef.current?.active) {
+      return streamRef.current;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
+    streamRef.current = stream;
+
+    const { audioContext, analyser } = createAudioAnalyser(stream);
+    audioContextRef.current = audioContext;
+
+    const tick = () => {
+      readAudioLevels(analyser);
+      frameRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+
+    return stream;
+  }, []);
 
   const openSession = useCallback(async () => {
     if (!sessionId || openedRef.current) {
@@ -155,7 +219,7 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
       await handleBudgetResponse(payload, false);
     } catch (openError) {
       if (generation === sessionGenerationRef.current) {
-        setStatus("error");
+        setStatus("ready");
         setError(openError instanceof Error ? openError.message : "Budget voice failed.");
       }
     }
@@ -175,7 +239,7 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
       const formData = new FormData();
       formData.set("sessionId", sessionId);
       formData.set("audio", audioBlob, "turn.webm");
-      formData.set("history", JSON.stringify(transcript));
+      formData.set("history", JSON.stringify(transcriptRef.current));
       if (instructionContext) {
         formData.set("currentItemId", instructionContext.currentItemId);
         formData.set("turnsOnNode", String(instructionContext.turnsOnNode));
@@ -207,34 +271,62 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
         }
       }
     },
-    [handleBudgetResponse, sessionId, transcript],
+    [handleBudgetResponse, sessionId],
   );
 
-  const startPushToTalk = useCallback(async () => {
-    if (!sessionId || isRecording || status === "processing" || status === "speaking") {
+  /** First tap — unlock audio, mic permission, Teenee opening line. Must run from click handler. */
+  const startSession = useCallback(async () => {
+    if (!sessionId || status === "processing" || status === "speaking" || status === "connecting") {
       return;
     }
 
+    unlockAudioPlayback();
     setError(null);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      streamRef.current = stream;
+      await ensureMicStream();
 
-      const { audioContext, analyser } = createAudioAnalyser(stream);
-      audioContextRef.current = audioContext;
+      if (!openedRef.current) {
+        await openSession();
+        return;
+      }
 
-      const tick = () => {
-        readAudioLevels(analyser);
-        frameRef.current = requestAnimationFrame(tick);
-      };
-      tick();
+      setStatus("connected");
+    } catch (startError) {
+      setStatus("ready");
+      const message =
+        startError instanceof Error ? startError.message : "Microphone access is required.";
+      if (message.toLowerCase().includes("not allowed")) {
+        setError("Tap Start to allow microphone access.");
+      } else {
+        setError(message);
+      }
+    }
+  }, [ensureMicStream, openSession, sessionId, status]);
+
+  const startRecording = useCallback(async () => {
+    if (
+      !sessionId ||
+      isRecording ||
+      status === "processing" ||
+      status === "speaking" ||
+      status === "connecting"
+    ) {
+      return;
+    }
+
+    unlockAudioPlayback();
+    setError(null);
+
+    try {
+      const stream = await ensureMicStream();
+
+      if (!openedRef.current) {
+        await openSession();
+        if (!openedRef.current) {
+          return;
+        }
+      }
 
       const recorder = new MediaRecorder(stream);
       recorderRef.current = recorder;
@@ -247,11 +339,8 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
       };
 
       recorder.onstop = () => {
-        stopVisualizer();
+        stopRecorderOnly();
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
-        stopMediaStream(streamRef.current);
-        streamRef.current = null;
-        setIsRecording(false);
 
         if (blob.size > 0) {
           void submitTurn(blob);
@@ -263,30 +352,39 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
       recorder.start(250);
       setIsRecording(true);
       setStatus("recording");
-    } catch {
-      cleanupRecording();
-      setStatus("connected");
-      setError("Microphone access is required.");
+    } catch (recordError) {
+      stopRecorderOnly();
+      setStatus(openedRef.current ? "connected" : "ready");
+      const message =
+        recordError instanceof Error ? recordError.message : "Microphone access is required.";
+      if (message.toLowerCase().includes("not allowed")) {
+        setError("Tap Talk to allow microphone access.");
+      } else {
+        setError(message);
+      }
     }
-  }, [cleanupRecording, isRecording, sessionId, status, stopVisualizer, submitTurn]);
+  }, [ensureMicStream, isRecording, openSession, sessionId, status, stopRecorderOnly, submitTurn]);
 
-  const stopPushToTalk = useCallback(() => {
+  const stopRecording = useCallback(() => {
     if (recorderRef.current?.state === "recording") {
       recorderRef.current.stop();
     }
   }, []);
 
-  useEffect(() => {
-    if (!sessionId || !contextReady) {
+  /** Tap once to start, tap again to stop and send. */
+  const toggleTalk = useCallback(() => {
+    if (status === "ready" || status === "idle") {
+      void startSession();
       return;
     }
 
-    void openSession();
+    if (isRecording) {
+      stopRecording();
+      return;
+    }
 
-    return () => {
-      disconnect();
-    };
-  }, [contextReady, disconnect, openSession, sessionId]);
+    void startRecording();
+  }, [isRecording, startRecording, startSession, status, stopRecording]);
 
   return {
     status,
@@ -294,10 +392,13 @@ export function useBudgetVoice(sessionId: string | null, options: UseBudgetVoice
     error,
     disconnect,
     refreshInstructions: async () => undefined,
-    commitUserTurn: stopPushToTalk,
-    startPushToTalk,
-    stopPushToTalk,
+    commitUserTurn: stopRecording,
+    startPushToTalk: startRecording,
+    stopPushToTalk: stopRecording,
+    toggleTalk,
+    startSession,
     isPushToTalkActive: isRecording,
-    voiceInputMode: "push_to_talk" as const,
+    needsStart: status === "ready" || status === "idle",
+    voiceInputMode: "tap_to_talk" as const,
   };
 }

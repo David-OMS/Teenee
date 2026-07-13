@@ -129,14 +129,14 @@ export function SettingsPanel() {
         value={voiceInputMode}
         options={[
           { value: "auto", label: "Auto — detect when you stop (Realtime only)" },
-          { value: "push_to_talk", label: "Push-to-talk — hold button" },
+          { value: "push_to_talk", label: "Tap to talk — tap once to start, again to send" },
         ]}
         disabled={saving || pipelineMode === "budget"}
         onChange={(value) => setVoiceInputMode(value === "push_to_talk" ? "push_to_talk" : "auto")}
       />
       <p className="text-xs leading-relaxed text-muted-light">
         Auto uses silence detection (tap &quot;Done speaking&quot; in session if it waits too long).
-        Push-to-talk mutes the mic until you hold the button.
+        Tap to talk: tap Talk to record, tap Stop to send.
       </p>
 
       <SelectField

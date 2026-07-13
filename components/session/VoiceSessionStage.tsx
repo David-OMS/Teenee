@@ -78,7 +78,10 @@ export function VoiceSessionStage({
     commitUserTurn,
     startPushToTalk,
     stopPushToTalk,
+    toggleTalk,
+    startSession,
     isPushToTalkActive,
+    needsStart,
   } = useSessionVoice(sessionId, {
     contextReady: Boolean(context?.currentItem.id),
     voiceInputMode,
@@ -131,14 +134,31 @@ export function VoiceSessionStage({
     status === "connected" &&
     (isBudget || voiceInputMode === "auto" || isPushToTalkActive);
 
-  const isBusy = status === "processing" || status === "speaking";
+  const isBusy = status === "processing" || status === "speaking" || status === "connecting";
+
+  function handleTalkTap() {
+    if (isBudget) {
+      toggleTalk?.();
+      return;
+    }
+
+    if (voiceInputMode === "push_to_talk") {
+      if (isPushToTalkActive) {
+        stopPushToTalk();
+      } else {
+        startPushToTalk();
+      }
+    }
+  }
 
   const statusLabel =
-    status === "connected"
+    needsStart || status === "ready"
+      ? "Tap Start"
+      : status === "connected"
       ? isBudget || voiceInputMode === "push_to_talk"
         ? isPushToTalkActive
-          ? "Speaking…"
-          : "Hold to talk"
+          ? "Tap to stop"
+          : "Tap to talk"
         : "Listening"
       : status === "connecting"
         ? "Connecting…"
@@ -147,7 +167,7 @@ export function VoiceSessionStage({
       : status === "speaking"
         ? "Teenee speaking…"
       : status === "recording"
-        ? "Recording…"
+        ? "Tap to stop"
       : status === "error"
         ? "Voice error"
         : "Ready";
@@ -176,20 +196,29 @@ export function VoiceSessionStage({
         />
         <p className="text-xs uppercase tracking-widest text-muted-dark">{statusLabel}</p>
 
-        {(status === "connected" || status === "recording") &&
+        {(needsStart || status === "ready") && isBudget ? (
+          <button
+            type="button"
+            onClick={() => void (startSession?.() ?? toggleTalk?.())}
+            className="flex h-24 w-24 items-center justify-center rounded-full bg-accent text-sm font-semibold uppercase tracking-widest text-white"
+          >
+            Start
+          </button>
+        ) : null}
+
+        {!needsStart &&
+        status !== "ready" &&
+        (status === "connected" || status === "recording") &&
         (isBudget || voiceInputMode === "push_to_talk") ? (
           <button
             type="button"
             disabled={isBusy}
-            onPointerDown={() => void startPushToTalk()}
-            onPointerUp={() => stopPushToTalk()}
-            onPointerLeave={() => stopPushToTalk()}
-            onPointerCancel={() => stopPushToTalk()}
+            onClick={handleTalkTap}
             className={`flex h-24 w-24 items-center justify-center rounded-full text-sm font-semibold uppercase tracking-widest disabled:opacity-50 ${
               isPushToTalkActive ? "bg-accent text-white" : "border border-white/30 text-foreground-dark"
             }`}
           >
-            {isPushToTalkActive ? "…" : "Hold"}
+            {isPushToTalkActive ? "Stop" : "Talk"}
           </button>
         ) : null}
 

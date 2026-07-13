@@ -10,6 +10,7 @@ import type { TranscriptLine } from "@/lib/realtime/parse-realtime-event";
 
 export type SessionVoiceStatus =
   | "idle"
+  | "ready"
   | "connecting"
   | "connected"
   | "recording"
@@ -45,5 +46,8 @@ export function useSessionVoice(sessionId: string | null, options: UseSessionVoi
     pipelineMode: pipelineMode as VoicePipelineMode,
     status: active.status as SessionVoiceStatus,
     transcript: active.transcript as TranscriptLine[],
+    needsStart: "needsStart" in active ? Boolean(active.needsStart) : false,
+    toggleTalk: "toggleTalk" in active ? active.toggleTalk : undefined,
+    startSession: "startSession" in active ? active.startSession : undefined,
   };
 }

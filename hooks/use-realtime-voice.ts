@@ -390,5 +390,6 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     stopPushToTalk,
     isPushToTalkActive,
     voiceInputMode,
+    needsStart: false,
   };
 }
