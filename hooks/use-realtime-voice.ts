@@ -13,6 +13,7 @@ import {
 import {
   attachRemoteAudio,
   cleanupPeerConnection,
+  createBeatSystemMessageEvent,
   createCancelResponseEvent,
   createClearInputBufferEvent,
   createCommitInputBufferEvent,
@@ -52,6 +53,7 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
   const onTurnCompleteRef = useRef(options.onAssistantTurnComplete);
   const getInstructionContextRef = useRef(options.getInstructionContext);
   const refreshInstructionsRef = useRef<(() => Promise<void>) | null>(null);
+  const pushBeatUpdateRef = useRef<(() => Promise<void>) | null>(null);
   const userSpokeSinceLastAdvanceRef = useRef(false);
   const turnCompleteLockRef = useRef(false);
   const connectingRef = useRef(false);
@@ -130,7 +132,7 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     }
 
     const instructionContext = getInstructionContextRef.current?.();
-    const params = new URLSearchParams({ sessionId });
+    const params = new URLSearchParams({ sessionId, stableOnly: "true" });
     if (instructionContext) {
       params.set("currentItemId", instructionContext.currentItemId);
       params.set("turnsOnNode", String(instructionContext.turnsOnNode));
@@ -140,8 +142,8 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     }
 
     const response = await fetch(`/api/realtime/instructions?${params.toString()}`);
-    const payload = (await response.json()) as { instructions?: string; error?: string };
-    if (!response.ok || !payload.instructions) {
+    const payload = (await response.json()) as { stable?: string; error?: string };
+    if (!response.ok || !payload.stable) {
       return;
     }
 
@@ -149,16 +151,47 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     sendDataChannelEvent(dc, createCancelResponseEvent());
     sendDataChannelEvent(
       dc,
-      createSessionUpdateEvent(payload.instructions, {
+      createSessionUpdateEvent(payload.stable, {
         voiceInputMode,
         silenceTimeoutSeconds,
       }),
     );
+
+    await pushBeatUpdateRef.current?.();
   }, [sessionId, silenceTimeoutSeconds, voiceInputMode]);
+
+  const pushBeatUpdate = useCallback(async () => {
+    if (!sessionId || !dcRef.current || dcRef.current.readyState !== "open") {
+      return;
+    }
+
+    if (responseInFlightRef.current) {
+      return;
+    }
+
+    const instructionContext = getInstructionContextRef.current?.();
+    const params = new URLSearchParams({ sessionId, beatOnly: "true" });
+    if (instructionContext) {
+      params.set("currentItemId", instructionContext.currentItemId);
+      params.set("turnsOnNode", String(instructionContext.turnsOnNode));
+      if (instructionContext.promptOverride?.trim()) {
+        params.set("promptOverride", instructionContext.promptOverride.trim());
+      }
+    }
+
+    const response = await fetch(`/api/realtime/instructions?${params.toString()}`);
+    const payload = (await response.json()) as { turnBeat?: string; error?: string };
+    if (!response.ok || !payload.turnBeat) {
+      return;
+    }
+
+    sendDataChannelEvent(dcRef.current, createBeatSystemMessageEvent(payload.turnBeat));
+  }, [sessionId]);
 
   useEffect(() => {
     refreshInstructionsRef.current = refreshInstructions;
-  }, [refreshInstructions]);
+    pushBeatUpdateRef.current = pushBeatUpdate;
+  }, [pushBeatUpdate, refreshInstructions]);
 
   const handleAssistantTurnComplete = useCallback(async () => {
     if (turnCompleteLockRef.current) {
@@ -176,7 +209,7 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
 
     try {
       await onTurnCompleteRef.current?.();
-      await refreshInstructionsRef.current?.();
+      await pushBeatUpdateRef.current?.();
     } finally {
       window.setTimeout(() => {
         turnCompleteLockRef.current = false;

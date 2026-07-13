@@ -1,12 +1,30 @@
 import { stopMediaStream } from "@/lib/audio/stop-media-stream";
 import type { VoiceInputMode } from "@/types/conversation/voice-input-mode";
 
+export function createBeatSystemMessageEvent(beatText: string) {
+  return {
+    type: "conversation.item.create",
+    item: {
+      type: "message",
+      role: "system",
+      content: [{ type: "input_text", text: beatText }],
+    },
+  };
+}
+
 export function createSessionUpdateEvent(
   instructions: string,
   options: { voiceInputMode?: VoiceInputMode; silenceTimeoutSeconds?: number } = {},
 ) {
   const session: Record<string, unknown> = {
     instructions,
+    truncation: {
+      type: "retention_ratio",
+      retention_ratio: 0.8,
+      token_limits: {
+        post_instructions: 4096,
+      },
+    },
   };
 
   if (options.voiceInputMode === "push_to_talk") {

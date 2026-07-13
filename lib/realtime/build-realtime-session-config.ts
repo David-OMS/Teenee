@@ -21,6 +21,13 @@ export function buildRealtimeSessionConfig(
     type: "realtime",
     model: readRealtimeModel(),
     instructions,
+    truncation: {
+      type: "retention_ratio",
+      retention_ratio: 0.8,
+      token_limits: {
+        post_instructions: 4096,
+      },
+    },
     audio: {
       input: {
         turn_detection: turnDetection,

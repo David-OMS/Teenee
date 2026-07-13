@@ -4,8 +4,9 @@ import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AudioWaveform } from "@/components/dump/AudioWaveform";
-import { useRealtimeVoice } from "@/hooks/use-realtime-voice";
+import { useSessionVoice } from "@/hooks/use-session-voice";
 import { useVoiceInputMode } from "@/hooks/use-voice-input-mode";
+import { useVoicePipelineMode } from "@/hooks/use-voice-pipeline-mode";
 import type { TranscriptLine } from "@/lib/realtime/parse-realtime-event";
 import type { SessionPhase } from "@/types/session/session-phase";
 import type { TurnContextSlice } from "@/types/session/turn-context-slice";
@@ -45,6 +46,7 @@ export function VoiceSessionStage({
 }: VoiceSessionStageProps) {
   const router = useRouter();
   const { mode: voiceInputMode } = useVoiceInputMode();
+  const { mode: pipelineMode } = useVoicePipelineMode();
   const startedAtRef = useRef<number>(Date.now());
   const contextRef = useRef(context);
   contextRef.current = context;
@@ -77,7 +79,8 @@ export function VoiceSessionStage({
     startPushToTalk,
     stopPushToTalk,
     isPushToTalkActive,
-  } = useRealtimeVoice(sessionId, {
+  } = useSessionVoice(sessionId, {
+    contextReady: Boolean(context?.currentItem.id),
     voiceInputMode,
     silenceTimeoutSeconds,
     onAssistantTurnComplete: onTurnComplete,
@@ -88,7 +91,9 @@ export function VoiceSessionStage({
     promptOverrideRef.current = promptDraft.trim();
     setIsApplyingPrompt(true);
     try {
-      await refreshInstructions();
+      if (pipelineMode === "realtime") {
+        await refreshInstructions();
+      }
     } finally {
       setIsApplyingPrompt(false);
     }
@@ -121,48 +126,66 @@ export function VoiceSessionStage({
     }
   }
 
+  const isBudget = pipelineMode === "budget";
+  const isActiveMic =
+    status === "connected" &&
+    (isBudget || voiceInputMode === "auto" || isPushToTalkActive);
+
+  const isBusy = status === "processing" || status === "speaking";
+
   const statusLabel =
     status === "connected"
-      ? voiceInputMode === "push_to_talk"
+      ? isBudget || voiceInputMode === "push_to_talk"
         ? isPushToTalkActive
           ? "Speaking…"
           : "Hold to talk"
         : "Listening"
       : status === "connecting"
         ? "Connecting…"
-        : status === "error"
-          ? "Voice error"
-          : "Ready";
+      : status === "processing"
+        ? "Thinking…"
+      : status === "speaking"
+        ? "Teenee speaking…"
+      : status === "recording"
+        ? "Recording…"
+      : status === "error"
+        ? "Voice error"
+        : "Ready";
 
   return (
     <div className="flex flex-1 flex-col px-5 pb-28 pt-8">
       <p className="text-xs uppercase tracking-widest text-muted-dark">
-        {phase === "explain" ? "Explain mode" : "Practice mode"}
+        {phase === "explain" ? "Explain mode" : "Practice mode"} ·{" "}
+        {isBudget ? "Budget voice" : "Realtime voice"}
       </p>
       <h1 className="mt-2 font-display text-3xl uppercase tracking-tight">{lessonTitle}</h1>
       <p className="mt-4 text-sm leading-relaxed text-muted-dark">
         {context?.currentItem.label ?? "French-first conversation."}
       </p>
 
+      {isBudget ? (
+        <p className="mt-2 text-xs text-muted-dark">
+          Whisper + mini chat + TTS — much cheaper for daily practice.
+        </p>
+      ) : null}
+
       <div className="mt-10 flex flex-1 flex-col items-center justify-center gap-6">
         <AudioWaveform
-          levels={
-            status === "connected" && (voiceInputMode === "auto" || isPushToTalkActive)
-              ? [0.3, 0.6, 0.4, 0.7, 0.5]
-              : [0.1, 0.1, 0.1]
-          }
-          isActive={status === "connected"}
+          levels={isActiveMic || status === "recording" ? [0.3, 0.6, 0.4, 0.7, 0.5] : [0.1, 0.1, 0.1]}
+          isActive={status !== "idle" && status !== "error"}
         />
         <p className="text-xs uppercase tracking-widest text-muted-dark">{statusLabel}</p>
 
-        {status === "connected" && voiceInputMode === "push_to_talk" ? (
+        {(status === "connected" || status === "recording") &&
+        (isBudget || voiceInputMode === "push_to_talk") ? (
           <button
             type="button"
-            onPointerDown={() => startPushToTalk()}
+            disabled={isBusy}
+            onPointerDown={() => void startPushToTalk()}
             onPointerUp={() => stopPushToTalk()}
             onPointerLeave={() => stopPushToTalk()}
             onPointerCancel={() => stopPushToTalk()}
-            className={`flex h-24 w-24 items-center justify-center rounded-full text-sm font-semibold uppercase tracking-widest ${
+            className={`flex h-24 w-24 items-center justify-center rounded-full text-sm font-semibold uppercase tracking-widest disabled:opacity-50 ${
               isPushToTalkActive ? "bg-accent text-white" : "border border-white/30 text-foreground-dark"
             }`}
           >
@@ -170,7 +193,7 @@ export function VoiceSessionStage({
           </button>
         ) : null}
 
-        {status === "connected" && voiceInputMode === "auto" ? (
+        {!isBudget && status === "connected" && voiceInputMode === "auto" ? (
           <button
             type="button"
             onClick={() => commitUserTurn()}
@@ -200,11 +223,11 @@ export function VoiceSessionStage({
           />
           <button
             type="button"
-            disabled={isApplyingPrompt || status !== "connected"}
+            disabled={isApplyingPrompt || (pipelineMode === "realtime" && status !== "connected")}
             onClick={() => void handleApplyPrompt()}
             className="h-9 rounded-full bg-accent px-4 text-xs font-semibold uppercase tracking-widest text-white disabled:opacity-50"
           >
-            {isApplyingPrompt ? "Applying…" : "Apply now"}
+            {isApplyingPrompt ? "Applying…" : pipelineMode === "realtime" ? "Apply now" : "Saved for next turn"}
           </button>
           <p className="text-xs text-muted-dark">
             Knowledge-base French still applies. This only changes how Teenee behaves.

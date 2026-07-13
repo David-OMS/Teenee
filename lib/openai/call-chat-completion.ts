@@ -1,14 +1,14 @@
 import { readOpenAiApiKey } from "@/lib/openai/read-openai-api-key";
 import { readChatModel } from "@/lib/openai/read-chat-model";
 
-export type JsonChatMessage = {
-  role: "system" | "user";
+export type ChatMessage = {
+  role: "system" | "user" | "assistant";
   content: string;
 };
 
-export async function callJsonChatCompletion(
-  messages: JsonChatMessage[],
-  model = readChatModel(),
+export async function callChatCompletion(
+  messages: ChatMessage[],
+  options: { model?: string; temperature?: number } = {},
 ): Promise<string> {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -17,10 +17,9 @@ export async function callJsonChatCompletion(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
+      model: options.model ?? readChatModel(),
       messages,
-      response_format: { type: "json_object" },
-      temperature: 0.2,
+      temperature: options.temperature ?? 0.4,
     }),
   });
 
@@ -33,7 +32,7 @@ export async function callJsonChatCompletion(
     choices: { message: { content: string } }[];
   };
 
-  const content = data.choices[0]?.message?.content;
+  const content = data.choices[0]?.message?.content?.trim();
   if (!content) {
     throw new Error("OpenAI returned an empty response.");
   }

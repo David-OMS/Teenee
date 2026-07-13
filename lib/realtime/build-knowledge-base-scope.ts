@@ -65,6 +65,29 @@ function deriveComplexity(phraseCount: number, lessonCount: number): KnowledgeCo
   return "conversational";
 }
 
+/** Phrases listed in prompts — compact list to reduce realtime token cost. */
+export function getCompactPromptFrenchPhrases(scope: KnowledgeBaseScope): string[] {
+  const todayKeys = new Set(scope.todayFrench.map((phrase) => phrase.toLowerCase()));
+  const rest = scope.allowedFrench.filter((phrase) => !todayKeys.has(phrase.toLowerCase()));
+
+  switch (scope.complexity) {
+    case "minimal":
+      return scope.todayFrench.length > 0 ? scope.todayFrench : scope.allowedFrench.slice(0, 12);
+    case "building":
+      return uniquePhrases([...scope.todayFrench, ...rest.slice(0, 20)]);
+    case "conversational":
+      return uniquePhrases([...scope.todayFrench, ...rest.slice(0, 40)]);
+  }
+}
+
+function formatPhraseList(phrases: string[]): string {
+  if (phrases.length === 0) {
+    return "- (none listed)";
+  }
+
+  return phrases.map((phrase) => `- ${phrase}`).join("\n");
+}
+
 /** Build allow-list from the full knowledge graph — grows with every confirmed dump. */
 export function buildKnowledgeBaseScope(input: {
   knowledge: KnowledgeSnapshot;
@@ -126,18 +149,26 @@ function formatComplexityGuidance(scope: KnowledgeBaseScope): string {
   }
 }
 
-export function formatKnowledgeScopeInstructions(scope: KnowledgeBaseScope): string {
-  const allFrench = scope.allowedFrench.map((phrase) => `- ${phrase}`).join("\n");
-  const todayFrench =
-    scope.todayFrench.length > 0
-      ? scope.todayFrench.map((phrase) => `- ${phrase}`).join("\n")
-      : "- (none listed)";
+export function formatKnowledgeScopeInstructions(
+  scope: KnowledgeBaseScope,
+  options: { compact?: boolean } = {},
+): string {
+  const compact = options.compact ?? false;
+  const listedPhrases = compact ? getCompactPromptFrenchPhrases(scope) : scope.allowedFrench;
+  const omittedCount = compact ? Math.max(0, scope.phraseCount - listedPhrases.length) : 0;
+  const listedFrench = formatPhraseList(listedPhrases);
+  const todayFrench = formatPhraseList(scope.todayFrench);
 
   return [
     "KNOWLEDGE BASE RULE (always — non-negotiable):",
     "The student can ONLY understand French they have dumped and confirmed.",
-    `You may ONLY use French from their knowledge base (${scope.phraseCount} phrases, ${scope.confirmedLessonCount} lesson${scope.confirmedLessonCount === 1 ? "" : "s"}):`,
-    allFrench,
+    compact
+      ? `You may ONLY use French from their knowledge base (${scope.phraseCount} phrases total, ${scope.confirmedLessonCount} lesson${scope.confirmedLessonCount === 1 ? "" : "s"}). Listed below:`
+      : `You may ONLY use French from their knowledge base (${scope.phraseCount} phrases, ${scope.confirmedLessonCount} lesson${scope.confirmedLessonCount === 1 ? "" : "s"}):`,
+    listedFrench,
+    omittedCount > 0
+      ? `(+ ${omittedCount} more phrases in their graph — stick to listed + today's focus unless combining known listed phrases.)`
+      : "",
     "",
     "Today's focus — prioritize these in practice:",
     todayFrench,

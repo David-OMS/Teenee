@@ -1,4 +1,4 @@
-export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1";
+export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1-mini";
 
 /** Female-leaning Realtime voices: coral, shimmer, sage */
 export const DEFAULT_REALTIME_VOICE = "coral";

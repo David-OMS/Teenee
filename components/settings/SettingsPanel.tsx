@@ -10,6 +10,7 @@ import { SelectField } from "@/components/ui/SelectField";
 import { TextField } from "@/components/ui/TextField";
 import { ToggleField } from "@/components/ui/ToggleField";
 import { useVoiceInputMode } from "@/hooks/use-voice-input-mode";
+import { useVoicePipelineMode } from "@/hooks/use-voice-pipeline-mode";
 import {
   conversationModeOptions,
   getConversationModeBehavior,
@@ -34,6 +35,7 @@ export function SettingsPanel() {
   const { settings, isLoading, isSaving, error, save } = useUserSettings();
   const { profile, save: saveProfile, isSaving: isProfileSaving } = useUserProfile();
   const { mode: voiceInputMode, setMode: setVoiceInputMode } = useVoiceInputMode();
+  const { mode: pipelineMode, setMode: setPipelineMode } = useVoicePipelineMode();
   const [draftPhrases, setDraftPhrases] = useState<string[]>([]);
   const [draftName, setDraftName] = useState("");
 
@@ -108,13 +110,28 @@ export function SettingsPanel() {
       />
 
       <SelectField
+        label="Voice pipeline"
+        value={pipelineMode}
+        options={[
+          { value: "budget", label: "Budget — Whisper + mini + TTS (recommended)" },
+          { value: "realtime", label: "Realtime — live WebRTC (premium)" },
+        ]}
+        disabled={saving}
+        onChange={(value) => setPipelineMode(value === "realtime" ? "realtime" : "budget")}
+      />
+      <p className="text-xs leading-relaxed text-muted-light">
+        Budget mode costs a fraction of Realtime. Use Realtime when you want the lowest latency.
+        Start a new session after changing.
+      </p>
+
+      <SelectField
         label="Voice input"
         value={voiceInputMode}
         options={[
-          { value: "auto", label: "Auto — detect when you stop" },
+          { value: "auto", label: "Auto — detect when you stop (Realtime only)" },
           { value: "push_to_talk", label: "Push-to-talk — hold button" },
         ]}
-        disabled={saving}
+        disabled={saving || pipelineMode === "budget"}
         onChange={(value) => setVoiceInputMode(value === "push_to_talk" ? "push_to_talk" : "auto")}
       />
       <p className="text-xs leading-relaxed text-muted-light">
@@ -131,7 +148,7 @@ export function SettingsPanel() {
           { value: "3", label: "3 seconds" },
           { value: "5", label: "5 seconds" },
         ]}
-        disabled={saving || voiceInputMode === "push_to_talk"}
+        disabled={saving || voiceInputMode === "push_to_talk" || pipelineMode === "budget"}
         onChange={(value) => void save({ silenceTimeoutSeconds: Number(value) })}
       />
 

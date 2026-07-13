@@ -16,6 +16,8 @@ export async function GET(request: Request) {
     const turnsOnNode = searchParams.get("turnsOnNode");
     const parsedTurns = turnsOnNode ? Number(turnsOnNode) : undefined;
     const promptOverride = searchParams.get("promptOverride") ?? undefined;
+    const beatOnly = searchParams.get("beatOnly") === "true";
+    const stableOnly = searchParams.get("stableOnly") === "true";
 
     const supabase = createServerClient();
     const userId = await getDefaultUserId(supabase);
@@ -23,6 +25,8 @@ export async function GET(request: Request) {
       currentItemId,
       turnsOnNode: parsedTurns,
       promptOverride,
+      beatOnly,
+      stableOnly,
     });
 
     return NextResponse.json(result);
