@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AudioWaveform } from "@/components/dump/AudioWaveform";
+import { prepareSessionMedia } from "@/lib/audio/session-media";
 import { useSessionVoice } from "@/hooks/use-session-voice";
 import { useVoiceInputMode } from "@/hooks/use-voice-input-mode";
 import { useVoicePipelineMode } from "@/hooks/use-voice-pipeline-mode";
@@ -76,12 +77,13 @@ export function VoiceSessionStage({
     disconnect,
     refreshInstructions,
     commitUserTurn,
-    startPushToTalk,
     stopPushToTalk,
     toggleTalk,
     startSession,
     isPushToTalkActive,
     needsStart,
+    lastAssistantText,
+    startPushToTalk,
   } = useSessionVoice(sessionId, {
     contextReady: Boolean(context?.currentItem.id),
     voiceInputMode,
@@ -136,18 +138,31 @@ export function VoiceSessionStage({
 
   const isBusy = status === "processing" || status === "speaking" || status === "connecting";
 
+  function handleStartTap() {
+    const { micPromise } = prepareSessionMedia();
+    startSession?.(micPromise);
+  }
+
   function handleTalkTap() {
-    if (isBudget) {
-      toggleTalk?.();
+    if (isPushToTalkActive) {
+      stopPushToTalk();
       return;
     }
 
-    if (voiceInputMode === "push_to_talk") {
-      if (isPushToTalkActive) {
-        stopPushToTalk();
-      } else {
-        startPushToTalk();
-      }
+    const { micPromise } = prepareSessionMedia();
+
+    if (needsStart) {
+      startSession?.(micPromise);
+      return;
+    }
+
+    if (isBudget) {
+      toggleTalk?.(micPromise);
+      return;
+    }
+
+    if (!isBudget && voiceInputMode === "push_to_talk") {
+      startPushToTalk?.();
     }
   }
 
@@ -189,6 +204,13 @@ export function VoiceSessionStage({
         </p>
       ) : null}
 
+      {lastAssistantText ? (
+        <p className="mt-3 rounded-2xl bg-card-dark px-4 py-3 text-base leading-relaxed text-foreground-dark">
+          <span className="text-xs uppercase tracking-widest text-muted-dark">Teenee: </span>
+          {lastAssistantText}
+        </p>
+      ) : null}
+
       <div className="mt-10 flex flex-1 flex-col items-center justify-center gap-6">
         <AudioWaveform
           levels={isActiveMic || status === "recording" ? [0.3, 0.6, 0.4, 0.7, 0.5] : [0.1, 0.1, 0.1]}
@@ -196,10 +218,10 @@ export function VoiceSessionStage({
         />
         <p className="text-xs uppercase tracking-widest text-muted-dark">{statusLabel}</p>
 
-        {(needsStart || status === "ready") && isBudget ? (
+        {(needsStart || status === "ready") ? (
           <button
             type="button"
-            onClick={() => void (startSession?.() ?? toggleTalk?.())}
+            onClick={handleStartTap}
             className="flex h-24 w-24 items-center justify-center rounded-full bg-accent text-sm font-semibold uppercase tracking-widest text-white"
           >
             Start

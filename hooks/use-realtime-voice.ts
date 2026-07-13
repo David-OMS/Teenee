@@ -21,9 +21,10 @@ import {
   createSessionUpdateEvent,
   setMicrophoneEnabled,
 } from "@/lib/realtime/realtime-webrtc-utils";
+import { closeSessionMedia, getRemoteAudioElement } from "@/lib/audio/session-media";
 import type { VoiceInputMode } from "@/types/conversation/voice-input-mode";
 
-export type RealtimeVoiceStatus = "idle" | "connecting" | "connected" | "error";
+export type RealtimeVoiceStatus = "idle" | "ready" | "connecting" | "connected" | "error";
 
 export type RealtimeInstructionContext = {
   currentItemId: string;
@@ -116,6 +117,7 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     pcRef.current = null;
     dcRef.current = null;
     streamRef.current = null;
+    closeSessionMedia();
     setIsPushToTalkActive(false);
     setStatus("idle");
   }, []);
@@ -252,38 +254,33 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
     commitUserTurn();
   }, [commitUserTurn, isPushToTalkActive]);
 
-  const connect = useCallback(async () => {
-    if (!sessionId || connectingRef.current || pcRef.current) {
-      return;
-    }
-
-    const generation = sessionGenerationRef.current + 1;
-    sessionGenerationRef.current = generation;
-    connectingRef.current = true;
-    setError(null);
-    setStatus("connecting");
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      streamRef.current = stream;
-
-      if (voiceInputMode === "push_to_talk") {
-        setMicrophoneEnabled(stream, false);
+  const connectWithMic = useCallback(
+    async (micPromise: Promise<MediaStream>) => {
+      if (!sessionId || connectingRef.current || pcRef.current) {
+        return;
       }
 
-      const pc = new RTCPeerConnection();
-      pcRef.current = pc;
+      const generation = sessionGenerationRef.current + 1;
+      sessionGenerationRef.current = generation;
+      connectingRef.current = true;
+      setError(null);
+      setStatus("connecting");
 
-      const audioElement = audioRef.current ?? new Audio();
-      audioElement.autoplay = true;
-      audioRef.current = audioElement;
-      attachRemoteAudio(pc, audioElement);
+      try {
+        const stream = await micPromise;
+        streamRef.current = stream;
+
+        if (voiceInputMode === "push_to_talk") {
+          setMicrophoneEnabled(stream, false);
+        }
+
+        const pc = new RTCPeerConnection();
+        pcRef.current = pc;
+
+        const audioElement = audioRef.current ?? getRemoteAudioElement();
+        audioElement.autoplay = true;
+        audioRef.current = audioElement;
+        attachRemoteAudio(pc, audioElement);
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -364,32 +361,44 @@ export function useRealtimeVoice(sessionId: string | null, options: UseRealtimeV
         connectingRef.current = false;
       }
     }
-  }, [beginAssistantSpeech, disconnect, handleAssistantTurnComplete, sessionId, voiceInputMode]);
+  },
+    [beginAssistantSpeech, disconnect, handleAssistantTurnComplete, sessionId, voiceInputMode],
+  );
+
+  const startSession = useCallback(
+    (micPromise: Promise<MediaStream>) => {
+      void connectWithMic(micPromise);
+    },
+    [connectWithMic],
+  );
 
   useEffect(() => {
     if (!sessionId) {
       return;
     }
 
-    void connect();
+    setStatus("ready");
+    setError(null);
 
     return () => {
       disconnect();
     };
-  }, [connect, disconnect, sessionId]);
+  }, [disconnect, sessionId]);
 
   return {
     status,
     transcript,
     error,
-    connect,
+    connect: connectWithMic,
     disconnect,
     refreshInstructions,
     commitUserTurn,
     startPushToTalk,
     stopPushToTalk,
+    startSession,
     isPushToTalkActive,
     voiceInputMode,
-    needsStart: false,
+    needsStart: status === "ready" || status === "idle",
+    lastAssistantText: null,
   };
 }

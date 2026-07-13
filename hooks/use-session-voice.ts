@@ -47,7 +47,17 @@ export function useSessionVoice(sessionId: string | null, options: UseSessionVoi
     status: active.status as SessionVoiceStatus,
     transcript: active.transcript as TranscriptLine[],
     needsStart: "needsStart" in active ? Boolean(active.needsStart) : false,
-    toggleTalk: "toggleTalk" in active ? active.toggleTalk : undefined,
-    startSession: "startSession" in active ? active.startSession : undefined,
+    toggleTalk:
+      "toggleTalk" in active
+        ? (active.toggleTalk as (micPromise: Promise<MediaStream>) => void)
+        : undefined,
+    startSession:
+      "startSession" in active
+        ? (active.startSession as (micPromise: Promise<MediaStream>) => void)
+        : undefined,
+    lastAssistantText:
+      "lastAssistantText" in active ? (active.lastAssistantText as string | null) : null,
+    startPushToTalk:
+      "startPushToTalk" in active ? (active.startPushToTalk as () => void) : undefined,
   };
 }
